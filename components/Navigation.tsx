@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Home, Search, MessageCircle, User, HeartHandshake } from 'lucide-react'; 
+import { Home, MessageCircle, User, Heart, PawPrint } from 'lucide-react'; 
 import { Tab } from '../types';
 import { useLanguage } from '../LanguageContext';
 
@@ -25,12 +25,12 @@ export const Navigation: React.FC<NavigationProps> = ({ currentTab, onTabChange 
           <span className="text-[9px] font-medium truncate w-full">{t('nav.feed')}</span>
         </button>
         <button onClick={() => onTabChange('discovery')} className={getIconClass('discovery')}>
-          <Search size={24} strokeWidth={currentTab === 'discovery' ? 2.5 : 2} />
+          <PawPrint size={24} strokeWidth={currentTab === 'discovery' ? 2.5 : 2} />
           <span className="text-[9px] font-medium truncate w-full">{t('nav.discovery')}</span>
         </button>
         <button onClick={() => onTabChange('beeline')} className={getIconClass('beeline')}>
           <div className="relative">
-             <HeartHandshake size={24} strokeWidth={currentTab === 'beeline' ? 2.5 : 2} />
+             <Heart size={24} strokeWidth={currentTab === 'beeline' ? 2.5 : 2} />
              {/* Badge for Beeline (Mocked) */}
              <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></div>
           </div>

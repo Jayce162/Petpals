@@ -28,6 +28,10 @@
             },
             fontFamily: {
               sans: ['Inter', 'sans-serif'],
+            },
+            animation: {
+              'like-heart-pop': 'likeHeartPop 0.8s ease-out forwards',
+              'float': 'float 3s ease-in-out infinite',
             }
           }
         }
@@ -47,8 +51,9 @@
       .will-change-transform { will-change: transform; }
       .touch-pan-y { touch-action: pan-y; }
       .touch-none { touch-action: none; }
+      .transform-style-3d { transform-style: preserve-3d; }
       
-      /* Keyframes definitions if needed */
+      /* Keyframes definitions */
       .animate-in { animation-duration: 0.3s; animation-fill-mode: both; }
       .fade-in { animation-name: fadeIn; }
       .slide-in-from-right { animation-name: slideInRight; }
@@ -57,6 +62,32 @@
       @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
       @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
       @keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+      
+      @keyframes rotation {
+        0% { transform: rotateZ(0deg); }
+        100% { transform: rotateZ(360deg); }
+      }
+      
+      @keyframes floating {
+        0% { transform: translateY(0px); }
+        50% { transform: translateY(10px); }
+        100% { transform: translateY(0px); }
+      }
+
+      @keyframes likeHeartPop {
+        0% { opacity: 0; transform: scale(0); }
+        15% { opacity: 1; transform: scale(1.2); }
+        30% { transform: scale(0.9); }
+        45% { transform: scale(1.1); }
+        80% { opacity: 1; transform: scale(1); }
+        100% { opacity: 0; transform: scale(0) translateY(-50px); }
+      }
+      
+      /* Utilities */
+      .mask-image-gradient {
+        mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+        -webkit-mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+      }
     </style>
   <script type="importmap">
 {

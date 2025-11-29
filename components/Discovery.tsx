@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Heart, Star, SlidersHorizontal, PawPrint, Info, ChevronDown, MapPin, Ruler, Zap, CheckCircle, ShieldCheck, Flag, AlertTriangle, BadgeCheck, Lock } from 'lucide-react';
+import { X, Heart, Star, SlidersHorizontal, PawPrint, Info, ChevronDown, MapPin, Ruler, Zap, CheckCircle, ShieldCheck, Flag, AlertTriangle, BadgeCheck, Lock, RotateCcw, Bone } from 'lucide-react';
 import { PetProfile } from '../types';
 import { useLanguage } from '../LanguageContext';
 import { PLACEHOLDER_AVATAR, PLACEHOLDER_IMAGE } from '../constants';
@@ -18,6 +18,12 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
   const [showInfo, setShowInfo] = useState(false);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   
+  // Filter States
+  const [playPalsMode, setPlayPalsMode] = useState(false);
+  
+  // Swipe History for Undo
+  const [history, setHistory] = useState<('left' | 'right')[]>([]);
+  
   // Photo Navigation State
   const [photoIndex, setPhotoIndex] = useState(0);
   
@@ -34,6 +40,7 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
   
   // Pull to Close State
   const [pullStartY, setPullStartY] = useState<number | null>(null);
+  const [pullStartX, setPullStartX] = useState<number | null>(null);
   const [pullOffset, setPullOffset] = useState(0);
   const [isPulling, setIsPulling] = useState(false);
 
@@ -44,7 +51,7 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
   const nextPet = pets[currentIndex + 1];
   const thirdPet = pets[currentIndex + 2];
 
-  const SWIPE_THRESHOLD = 100;
+  const SWIPE_THRESHOLD = 80;
   const PULL_CLOSE_THRESHOLD = 120;
   const SCREEN_WIDTH = typeof window !== 'undefined' ? window.innerWidth : 400;
 
@@ -62,14 +69,36 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
     if (isSwiping || !currentPet) return;
     
     setIsSwiping(true);
-    if (showInfo) {
-        setShowInfo(false);
-        setTimeout(() => {
-             triggerFlyAway(direction);
-        }, 300); 
-        return;
-    }
     triggerFlyAway(direction);
+  };
+
+  const handleUndo = () => {
+    if (currentIndex > 0) {
+        if (!isPremium) {
+            onOpenPremium();
+            return;
+        }
+        
+        // Determine which side to bring it back from based on history
+        const lastDirection = history[history.length - 1] || 'left';
+        const startX = lastDirection === 'right' ? SCREEN_WIDTH + 200 : -(SCREEN_WIDTH + 200);
+        
+        // Update History
+        setHistory(prev => prev.slice(0, -1));
+        
+        // 1. Position card off-screen immediately (disable transition)
+        setIsDragging(true); 
+        setDragOffset({ x: startX, y: 0 });
+        
+        // 2. Set index back to previous pet
+        setCurrentIndex(prev => prev - 1);
+        
+        // 3. Animate back to center (enable transition)
+        setTimeout(() => {
+            setIsDragging(false);
+            setDragOffset({ x: 0, y: 0 });
+        }, 50);
+    }
   };
 
   const triggerFlyAway = (direction: 'left' | 'right') => {
@@ -78,9 +107,12 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
 
       setTimeout(() => {
           onSwipe(direction, currentPet);
+          setHistory(prev => [...prev, direction]);
           setCurrentIndex(prev => prev + 1);
           setDragOffset({ x: 0, y: 0 });
           setIsSwiping(false);
+          setShowInfo(false); 
+          setPullOffset(0);
       }, 300);
   };
 
@@ -139,21 +171,33 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
 
   const handleDetailTouchStart = (e: React.TouchEvent) => {
       if (isReportModalOpen) return;
-      const scrollTop = detailScrollRef.current?.scrollTop || 0;
-      if (scrollTop <= 0) {
-          setPullStartY(e.touches[0].clientY);
-      }
+      setPullStartY(e.touches[0].clientY);
+      setPullStartX(e.touches[0].clientX);
   };
 
   const handleDetailTouchMove = (e: React.TouchEvent) => {
-      if (pullStartY === null || isReportModalOpen) return;
+      if (pullStartY === null || pullStartX === null || isReportModalOpen) return;
+      
+      const currentX = e.touches[0].clientX;
       const currentY = e.touches[0].clientY;
-      const diff = currentY - pullStartY;
-      if (!isPulling && diff > 10 && (detailScrollRef.current?.scrollTop || 0) <= 0) setIsPulling(true);
-      if (isPulling) {
-          if (diff > 0) {
-              setPullOffset(diff * 0.5); 
-              if (e.cancelable) e.preventDefault(); 
+      const diffX = currentX - pullStartX;
+      const diffY = currentY - pullStartY;
+
+      if (!isPulling && !isDragging) {
+          if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 10) {
+              setIsDragging(true); 
+          } else if (diffY > 10 && (detailScrollRef.current?.scrollTop || 0) <= 0) {
+              setIsPulling(true); 
+          }
+      }
+
+      if (isDragging) {
+          setDragOffset({ x: diffX, y: 0 });
+          if (e.cancelable) e.preventDefault(); 
+      } else if (isPulling) {
+          if (diffY > 0) {
+              setPullOffset(diffY * 0.5);
+              if (e.cancelable) e.preventDefault();
           } else {
               setPullOffset(0);
           }
@@ -161,10 +205,22 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
   };
 
   const handleDetailTouchEnd = () => {
-      if (isPulling && pullOffset > PULL_CLOSE_THRESHOLD) setShowInfo(false);
-      setIsPulling(false);
+      if (isDragging) {
+          if (dragOffset.x > SWIPE_THRESHOLD) {
+              handleSwipeAction('right');
+          } else if (dragOffset.x < -SWIPE_THRESHOLD) {
+              handleSwipeAction('left');
+          } else {
+              setDragOffset({ x: 0, y: 0 }); 
+          }
+          setIsDragging(false);
+      } else if (isPulling) {
+          if (pullOffset > PULL_CLOSE_THRESHOLD) setShowInfo(false);
+          setIsPulling(false);
+          setPullOffset(0);
+      }
       setPullStartY(null);
-      setPullOffset(0);
+      setPullStartX(null);
   };
 
   const onMouseDown = (e: React.MouseEvent) => handleDragStart(e.clientX, e.clientY);
@@ -184,6 +240,14 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
     cursor: isDragging ? 'grabbing' : 'grab',
     zIndex: 30,
     willChange: 'transform'
+  });
+
+  const getDetailViewStyle = () => ({
+      transform: showInfo 
+        ? `translate3d(${dragOffset.x}px, ${pullOffset}px, 0) rotate(${dragOffset.x * 0.02}deg)` 
+        : 'translate3d(0, 100%, 0)',
+      transition: (isDragging || isPulling) ? 'none' : 'transform 0.5s cubic-bezier(0.32, 0.72, 0, 1)',
+      willChange: 'transform'
   });
 
   const getNextCardStyle = () => {
@@ -215,10 +279,16 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
         <div className="w-8 h-8 bg-amber-100 rounded-full flex items-center justify-center text-amber-500">
             <Lock size={16} />
         </div>
-        {/* Shimmer Effect */}
         <div className="absolute inset-0 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/40 to-transparent transform skew-x-12" />
     </div>
   );
+
+  // Check if a pet qualifies as a Play Pal (Mock logic: has 'Playful', 'Fetch' vibes, or high energy)
+  const isPlayPal = (pet: PetProfile) => {
+      return pet.energyLevel === 'High' || pet.vibes.some(v => 
+          ['Playful', 'Fetch', 'Zoomies', 'Toys', 'Ball is Life', 'High Energy'].some(k => v.includes(k))
+      );
+  };
 
   if (!currentPet) {
     return (
@@ -228,15 +298,106 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
         </div>
         <h2 className="text-3xl font-bold text-gray-900 mb-2">{t('discovery.allCaughtUp')}</h2>
         <p className="text-gray-500 text-lg">{t('discovery.checkLater')}</p>
-        <button 
-            onClick={() => window.location.reload()}
-            className="mt-8 px-8 py-4 bg-coral-500 text-white rounded-full font-bold shadow-xl shadow-coral-200 hover:bg-coral-600 transition active:scale-95"
-        >
-            {t('discovery.refresh')}
-        </button>
+        <div className="flex items-center gap-4 mt-8">
+            {currentIndex > 0 && (
+                <button 
+                    onClick={handleUndo} 
+                    aria-label="Undo swipe"
+                    className="w-14 h-14 bg-white rounded-full shadow-lg text-amber-400 hover:text-amber-500 flex items-center justify-center border border-gray-100 transition-all active:scale-95"
+                >
+                    <RotateCcw size={24} strokeWidth={2.5} />
+                </button>
+            )}
+            <button 
+                onClick={() => window.location.reload()}
+                className="px-8 py-4 bg-coral-500 text-white rounded-full font-bold shadow-xl shadow-coral-200 hover:bg-coral-600 transition active:scale-95"
+            >
+                {t('discovery.refresh')}
+            </button>
+        </div>
       </div>
     );
   }
+
+  // --- NEON CARD COMPONENT ---
+  const NeonCard = ({ pet, isMain = false, style = {}, onInteract }: { pet: PetProfile, isMain?: boolean, style?: React.CSSProperties, onInteract?: any }) => (
+    <div 
+        ref={isMain ? cardRef : undefined}
+        style={style}
+        className={`absolute w-[90%] h-[65%] max-h-[580px] bg-black rounded-[32px] shadow-2xl overflow-hidden top-32 touch-none ${isMain ? '' : 'pointer-events-none'}`}
+        {...onInteract}
+    >
+        {isMain && pet.images.length > 1 && (
+            <div className="absolute top-4 left-0 w-full px-4 flex gap-1 z-40">
+                {pet.images.map((_, idx) => (
+                    <div key={idx} className={`h-1 rounded-full flex-1 transition-colors duration-300 ${idx === photoIndex ? 'bg-white' : 'bg-white/30'}`} />
+                ))}
+            </div>
+        )}
+        
+        {/* Like Stamp - Paw Bubble */}
+        {isMain && (
+            <div 
+                className="absolute top-8 left-8 z-30 pointer-events-none transition-all duration-200 flex flex-col items-center justify-center origin-top-left"
+                style={{ 
+                    opacity: getOverlayOpacity('right'),
+                    transform: `scale(${0.8 + Math.min(0.5, dragOffset.x / (SWIPE_THRESHOLD * 2))}) rotate(-15deg)`
+                }}
+            >
+                <div className="w-24 h-24 bg-gradient-to-br from-green-400 to-emerald-500 rounded-full flex items-center justify-center shadow-lg border-4 border-white animate-pulse">
+                    <PawPrint size={48} className="text-white fill-white/50" />
+                </div>
+                <div className="absolute -top-2 -right-2 w-6 h-6 bg-green-300 rounded-full border-2 border-white"></div>
+                <div className="absolute bottom-0 -left-2 w-4 h-4 bg-green-300 rounded-full border-2 border-white"></div>
+            </div>
+        )}
+
+        {/* Play Pal Badge */}
+        {(playPalsMode || isPlayPal(pet)) && (
+            <div className="absolute top-16 left-4 bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded-full border border-yellow-200 flex items-center gap-1 z-20 shadow-md animate-in slide-in-from-left-2 fade-in">
+                <Bone size={12} fill="currentColor" /> Play Pal
+            </div>
+        )}
+
+        <img 
+            src={pet.images[isMain ? photoIndex : 0] || pet.images[0]} 
+            alt={pet.name} 
+            className="w-full h-full object-cover pointer-events-none select-none transition-opacity duration-200"
+            draggable={false}
+        />
+
+        {isMain && (
+            <button 
+                onClick={(e) => { e.stopPropagation(); setShowInfo(true); }}
+                className="absolute top-4 right-4 bg-black/20 backdrop-blur-md p-2 rounded-full text-white/80 hover:bg-black/40 transition z-30 hover:scale-110"
+            >
+                <Info size={24} />
+            </button>
+        )}
+        
+        <div 
+            className="absolute bottom-0 left-0 w-full h-3/5 bg-gradient-to-t from-black/90 via-black/40 to-transparent flex flex-col justify-end p-6 pb-8 cursor-pointer"
+            onClick={isMain ? (e) => { e.stopPropagation(); setShowInfo(true); } : undefined}
+        >
+            <div className="flex items-end gap-3 mb-2">
+                <h2 className="text-4xl font-bold text-white shadow-sm flex items-center gap-2">
+                    {pet.name}, {pet.age}
+                    {pet.isVerified && <BadgeCheck size={32} className="text-white fill-blue-500" />}
+                </h2>
+                <span className="text-xl font-medium text-white/80 mb-1.5">{pet.gender === 'Female' ? '♀' : '♂'}</span>
+            </div>
+            <p className="text-xl font-medium text-white/90 mb-3">{pet.breed}</p>
+            <div className="flex items-center text-white/70 text-sm mb-4">
+                <MapPin size={16} className="mr-1" /> {pet.distance} {t('discovery.distance')}
+            </div>
+            {isMain && (
+                <div className="flex justify-center mt-4">
+                    <ChevronDown className="text-white/50 animate-bounce" size={24} />
+                </div>
+            )}
+        </div>
+    </div>
+  );
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-white flex flex-col select-none touch-none">
@@ -261,89 +422,52 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
         <div className={`absolute top-0 w-full h-full flex flex-col items-center justify-start pt-32 pb-32 transition-all duration-500 ease-in-out will-change-transform ${showInfo ? 'scale-95 opacity-50 blur-sm pointer-events-none' : 'scale-100 opacity-100'}`}>
             {/* 3rd Card */}
             {thirdPet && (
-                <div className="absolute w-[90%] h-[65%] max-h-[580px] bg-gray-200 rounded-[32px] overflow-hidden shadow-md top-36 transform scale-90 translate-y-5 opacity-50">
-                    <img src={thirdPet.images[0]} className="w-full h-full object-cover grayscale opacity-50" alt="pet" />
-                </div>
+                <NeonCard 
+                    pet={thirdPet} 
+                    style={{ transform: 'scale(0.9) translate3d(0, 30px, 0)', opacity: 0.5, zIndex: 5 }} 
+                />
             )}
 
             {/* Next Card */}
             {nextPet && (
-                <div style={getNextCardStyle()} className="absolute w-[90%] h-[65%] max-h-[580px] bg-white rounded-[32px] overflow-hidden shadow-xl top-32 border border-gray-100">
-                    <img src={nextPet.images[0]} alt="Next" className="w-full h-full object-cover" />
-                    <div className="absolute bottom-0 left-0 w-full h-1/2 bg-gradient-to-t from-black/80 to-transparent p-6 flex flex-col justify-end opacity-100">
-                         <h2 className="text-3xl font-bold text-white flex items-center gap-2">{nextPet.name}, {nextPet.age}</h2>
-                         <p className="text-lg font-medium text-white/90">{nextPet.breed}</p>
-                    </div>
-                </div>
+                <NeonCard 
+                    pet={nextPet} 
+                    style={getNextCardStyle()} 
+                />
             )}
 
             {/* Main Card */}
-            <div 
-                ref={cardRef}
+            <NeonCard 
+                pet={currentPet} 
+                isMain={true}
                 style={getCardStyle()}
-                className="absolute w-[90%] h-[65%] max-h-[580px] bg-black rounded-[32px] shadow-2xl overflow-hidden top-32 touch-none"
-                onMouseDown={onMouseDown}
-                onMouseMove={onMouseMove}
-                onMouseUp={onMouseUp}
-                onMouseLeave={onMouseLeave}
-                onTouchStart={onTouchStart}
-                onTouchMove={onTouchMove}
-                onTouchEnd={onTouchEnd}
-            >
-                {currentPet.images.length > 1 && (
-                    <div className="absolute top-4 left-0 w-full px-4 flex gap-1 z-40">
-                        {currentPet.images.map((_, idx) => (
-                            <div key={idx} className={`h-1 rounded-full flex-1 transition-colors duration-300 ${idx === photoIndex ? 'bg-white' : 'bg-white/30'}`} />
-                        ))}
-                    </div>
-                )}
-                <div className="absolute top-10 left-6 border-[6px] border-green-400 text-green-400 rounded-xl px-4 py-2 font-black text-4xl tracking-widest rotate-[-15deg] z-30 pointer-events-none transition-opacity bg-black/20 backdrop-blur-sm will-change-transform" style={{ opacity: getOverlayOpacity('right') }}>{t('discovery.like')}</div>
-                <div className="absolute top-10 right-6 border-[6px] border-red-500 text-red-500 rounded-xl px-4 py-2 font-black text-4xl tracking-widest rotate-[15deg] z-30 pointer-events-none transition-opacity bg-black/20 backdrop-blur-sm will-change-transform" style={{ opacity: getOverlayOpacity('left') }}>{t('discovery.nope')}</div>
-
-                <img 
-                    src={currentPet.images[photoIndex] || currentPet.images[0]} 
-                    alt={currentPet.name} 
-                    className="w-full h-full object-cover pointer-events-none select-none transition-opacity duration-200"
-                    draggable={false}
-                />
-
-                <button 
-                    onClick={(e) => { e.stopPropagation(); setShowInfo(true); }}
-                    className="absolute top-4 right-4 bg-black/20 backdrop-blur-md p-2 rounded-full text-white/80 hover:bg-black/40 transition z-30 hover:scale-110"
-                >
-                    <Info size={24} />
-                </button>
-                
-                <div 
-                    className="absolute bottom-0 left-0 w-full h-3/5 bg-gradient-to-t from-black/90 via-black/40 to-transparent flex flex-col justify-end p-6 pb-8 cursor-pointer"
-                    onClick={(e) => { e.stopPropagation(); setShowInfo(true); }}
-                >
-                    <div className="flex items-end gap-3 mb-2">
-                        <h2 className="text-4xl font-bold text-white shadow-sm flex items-center gap-2">
-                            {currentPet.name}, {currentPet.age}
-                            {currentPet.isVerified && <BadgeCheck size={32} className="text-white fill-blue-500" />}
-                        </h2>
-                        <span className="text-xl font-medium text-white/80 mb-1.5">{currentPet.gender === 'Female' ? '♀' : '♂'}</span>
-                    </div>
-                    <p className="text-xl font-medium text-white/90 mb-3">{currentPet.breed}</p>
-                    <div className="flex items-center text-white/70 text-sm mb-4">
-                        <MapPin size={16} className="mr-1" /> {currentPet.distance} {t('discovery.distance')}
-                    </div>
-                    <div className="flex justify-center mt-4">
-                        <ChevronDown className="text-white/50 animate-bounce" size={24} />
-                    </div>
-                </div>
-            </div>
+                onInteract={{
+                    onMouseDown, onMouseMove, onMouseUp, onMouseLeave,
+                    onTouchStart, onTouchMove, onTouchEnd
+                }}
+            />
             
             {/* Action Buttons */}
-            <div className="absolute bottom-8 flex items-center gap-8 z-50">
-                <button onClick={() => handleSwipeAction('left')} disabled={isSwiping} className="w-16 h-16 bg-white rounded-full shadow-lg text-gray-400 hover:text-red-500 flex items-center justify-center border border-gray-100 transition-all active:scale-90 disabled:opacity-50">
+            <div className="absolute bottom-8 flex items-center gap-6 z-50">
+                {/* Undo Button - Leftmost */}
+                {(currentIndex > 0 || history.length > 0) && (
+                    <button 
+                        onClick={handleUndo} 
+                        disabled={isSwiping}
+                        aria-label="Undo swipe"
+                        className="w-14 h-14 bg-white rounded-full shadow-lg text-amber-400 hover:text-amber-500 flex items-center justify-center border border-gray-100 backdrop-blur-sm bg-white/90 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                        <RotateCcw size={24} strokeWidth={2.5} />
+                    </button>
+                )}
+
+                <button onClick={() => handleSwipeAction('left')} disabled={isSwiping} className="w-16 h-16 bg-white rounded-full shadow-lg text-gray-400 hover:text-red-500 flex items-center justify-center border border-gray-100 backdrop-blur-sm bg-white/90 transition-all active:scale-90 disabled:opacity-50">
                     <X size={32} strokeWidth={3} />
                 </button>
                 <button onClick={() => handleSwipeAction('right')} disabled={isSwiping} className="w-20 h-20 bg-coral-500 rounded-full shadow-2xl shadow-coral-200 text-white hover:bg-coral-600 flex items-center justify-center transition-all active:scale-90 transform hover:-translate-y-1 disabled:opacity-50">
                     <Heart size={40} fill="currentColor" />
                 </button>
-                <button onClick={() => handleSwipeAction('right')} disabled={isSwiping} className="w-16 h-16 bg-white rounded-full shadow-lg text-blue-400 hover:text-blue-500 flex items-center justify-center border border-gray-100 transition-all active:scale-90 disabled:opacity-50">
+                <button onClick={() => handleSwipeAction('right')} disabled={isSwiping} className="w-16 h-16 bg-white rounded-full shadow-lg text-blue-400 hover:text-blue-500 flex items-center justify-center border border-gray-100 backdrop-blur-sm bg-white/90 transition-all active:scale-90 disabled:opacity-50">
                     <Star size={32} fill="currentColor" className="text-blue-100 stroke-blue-500" strokeWidth={2} />
                 </button>
             </div>
@@ -352,7 +476,7 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
         {/* --- DETAILED INFO MODE --- */}
         <div 
             className={`fixed inset-0 z-50 bg-white transition-transform duration-500 cubic-bezier(0.32, 0.72, 0, 1) will-change-transform ${showInfo ? 'translate-y-0' : 'translate-y-full'}`}
-            style={{ transform: showInfo ? `translate3d(0, ${pullOffset}px, 0)` : 'translate3d(0, 100%, 0)' }}
+            style={getDetailViewStyle()}
         >
             <div 
                 ref={detailScrollRef}
@@ -361,6 +485,25 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
                 onTouchMove={handleDetailTouchMove}
                 onTouchEnd={handleDetailTouchEnd}
             >
+                {/* Stamps for Detail View */}
+                {showInfo && (
+                    <>
+                        <div 
+                            className="fixed top-20 left-8 z-[60] pointer-events-none transition-all duration-200 flex flex-col items-center justify-center origin-top-left"
+                            style={{ 
+                                opacity: getOverlayOpacity('right'),
+                                transform: `scale(${0.8 + Math.min(0.5, dragOffset.x / (SWIPE_THRESHOLD * 2))}) rotate(-15deg)`
+                            }}
+                        >
+                            <div className="w-24 h-24 bg-gradient-to-br from-green-400 to-emerald-500 rounded-full flex items-center justify-center shadow-lg border-4 border-white animate-pulse">
+                                <PawPrint size={48} className="text-white fill-white/50" />
+                            </div>
+                            <div className="absolute -top-2 -right-2 w-6 h-6 bg-green-300 rounded-full border-2 border-white"></div>
+                            <div className="absolute bottom-0 -left-2 w-4 h-4 bg-green-300 rounded-full border-2 border-white"></div>
+                        </div>
+                    </>
+                )}
+
                 <div className="w-full h-[55vh] relative will-change-transform" style={{ transform: `translate3d(0, ${Math.min(0, pullOffset * 0.5)}px, 0)` }}>
                     <img 
                         src={currentPet.images[photoIndex] || currentPet.images[0]} 
@@ -471,6 +614,25 @@ export const Discovery: React.FC<DiscoveryProps> = ({ pets, onSwipe, isPremium, 
                     </div>
 
                     <div className="space-y-6 mb-8">
+                        {/* Play Pals Filter */}
+                        <div className="flex items-center justify-between p-4 bg-yellow-50 rounded-2xl border border-yellow-100">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-yellow-100 rounded-full text-yellow-600">
+                                    <Bone size={20} />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-gray-900">Looking for Play Pals</h3>
+                                    <p className="text-xs text-gray-500">Find pets for playdates</p>
+                                </div>
+                            </div>
+                            <button 
+                                onClick={() => setPlayPalsMode(!playPalsMode)}
+                                className={`w-12 h-7 flex items-center rounded-full p-1 transition-colors duration-300 ${playPalsMode ? 'bg-yellow-400' : 'bg-gray-200'}`}
+                            >
+                                <div className={`bg-white w-5 h-5 rounded-full shadow-md transform transition-transform duration-300 ${playPalsMode ? 'translate-x-5' : 'translate-x-0'}`} />
+                            </button>
+                        </div>
+
                         {/* Free Filters */}
                         <div>
                             <label className="block text-sm font-bold text-gray-700 mb-2">Maximum Distance (km)</label>
